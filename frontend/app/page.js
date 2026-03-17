@@ -6,7 +6,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const STORAGE_KEY = "body-diary-app-state-v1";
 const FREE_RECORD_LIMIT = 3;
 
-const tabItems = [
+const tabs = [
   { id: "home", label: "홈" },
   { id: "record", label: "기록" },
   { id: "compare", label: "비교" },
@@ -22,17 +22,6 @@ const conditionOptions = [
 
 const mealTypes = ["아침", "점심", "저녁", "간식"];
 
-const initialRecordDraft = () => ({
-  date: formatDate(),
-  frontImage: "",
-  sideImage: "",
-  weight: "",
-  condition: "normal",
-  memo: ""
-});
-
-const initialMealDraft = { type: "아침", calories: "", note: "" };
-
 function formatDate(date = new Date()) {
   return new Intl.DateTimeFormat("ko-KR", {
     year: "numeric",
@@ -45,23 +34,23 @@ function formatDate(date = new Date()) {
 }
 
 function formatShortDate(value) {
-  const date = new Date(value.replaceAll(".", "-"));
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat("ko-KR", {
-    month: "2-digit",
-    day: "2-digit"
-  })
-    .format(date)
-    .replaceAll(". ", ".")
-    .replace(/\.$/, "");
+  const match = value.match(/(\d{4})\.\s?(\d{2})\.\s?(\d{2})/);
+  if (!match) return value;
+  return `${match[2]}.${match[3]}`;
 }
 
-function getConditionLabel(id) {
-  return conditionOptions.find((option) => option.id === id)?.label || "보통";
+function initialRecordDraft() {
+  return {
+    date: formatDate(),
+    frontImage: "",
+    sideImage: "",
+    weight: "",
+    condition: "normal",
+    memo: ""
+  };
 }
+
+const initialMealDraft = { type: "아침", calories: "", note: "" };
 
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -85,10 +74,14 @@ function dataUrlToBlob(dataUrl) {
   return new Blob([array], { type: mime });
 }
 
+function getConditionLabel(condition) {
+  return conditionOptions.find((option) => option.id === condition)?.label || "보통";
+}
+
 function buildComparePayload(beforeRecord, afterRecord, angle) {
-  const imageField = angle === "측면" ? "sideImage" : "frontImage";
-  const beforeImage = beforeRecord[imageField];
-  const afterImage = afterRecord[imageField];
+  const field = angle === "측면" ? "sideImage" : "frontImage";
+  const beforeImage = beforeRecord[field];
+  const afterImage = afterRecord[field];
 
   if (!beforeImage || !afterImage) {
     throw new Error(`${angle} 사진이 모두 있는 기록끼리 비교해 주세요.`);
@@ -100,113 +93,92 @@ function buildComparePayload(beforeRecord, afterRecord, angle) {
   return formData;
 }
 
-function calculateWeeklySummary(records, meals, compareHistory) {
+function buildWeeklySummary(records, meals, compareHistory) {
   const recentRecords = records.slice(0, 7);
   const recentMeals = meals.slice(0, 14);
   const latestReport = compareHistory[0];
-  const streak = records.length;
-  const avgWeight = recentRecords.length
+  const averageWeight = recentRecords.length
     ? (
-        recentRecords.reduce((sum, record) => sum + (Number(record.weight) || 0), 0) / recentRecords.length
+        recentRecords.reduce((sum, item) => sum + (Number(item.weight) || 0), 0) / recentRecords.length
       ).toFixed(1)
     : null;
 
   return {
-    streak,
+    streak: records.length,
     recentRecordCount: recentRecords.length,
     recentMealCount: recentMeals.length,
-    latestSignal: latestReport?.overall_signal || "데이터 수집 중",
-    latestHeadline: latestReport?.headline || "아직 전후 비교 리포트가 없어요.",
-    changeScore: latestReport?.change_score || 0,
-    avgWeight
+    averageWeight,
+    latestSignal: latestReport?.overall_signal || "아직 데이터가 적어요",
+    latestHeadline: latestReport?.headline || "첫 전후 비교 리포트를 만들면 변화 흐름이 보이기 시작해요."
   };
 }
 
-function HeroCard({ summary, onNavigate }) {
-  return (
-    <section className="hero-card">
-      <div className="hero-copy">
-        <span className="eyebrow">Body Diary</span>
-        <h1>몸 변화를 숫자 하나보다 흐름으로 기록해 보세요.</h1>
-        <p>
-          눈바디 사진, 식단 메모, 전후 비교 리포트를 한곳에 쌓아두고 지난주보다 좋아졌는지 자연스럽게
-          확인하는 다이어리입니다.
-        </p>
-      </div>
-
-      <div className="insight-card">
-        <span>최근 변화 인사이트</span>
-        <strong>{summary.latestHeadline}</strong>
-        <small>{summary.streak}일 연속 기록 중</small>
-      </div>
-
-      <div className="quick-grid">
-        <button className="quick-card primary" onClick={() => onNavigate("record")}>
-          <span>오늘 체크인</span>
-          <strong>사진 기록 추가</strong>
-        </button>
-        <button className="quick-card" onClick={() => onNavigate("compare")}>
-          <span>전후 비교</span>
-          <strong>변화 리포트 보기</strong>
-        </button>
-      </div>
-    </section>
-  );
-}
-
-function HomeTab({ records, meals, compareHistory, onNavigate }) {
+function HomeTab({ records, meals, compareHistory, onMove }) {
+  const summary = buildWeeklySummary(records, meals, compareHistory);
   const today = formatDate();
   const todayMeals = meals.filter((meal) => meal.date === today);
-  const weeklySummary = calculateWeeklySummary(records, meals, compareHistory);
   const latestReport = compareHistory[0];
 
   return (
-    <div className="tab-shell">
-      <HeroCard summary={weeklySummary} onNavigate={onNavigate} />
-
-      <section className="section-card">
-        <div className="section-head">
-          <div>
-            <span>이번 주 요약</span>
-            <h2>몸 변화 다이어리 현황</h2>
-          </div>
+    <div className="content-grid">
+      <section className="panel hero-panel span-2">
+        <div className="hero-copy">
+          <span className="eyebrow">Body Diary</span>
+          <h1>몸 변화는 숫자보다 흐름으로 보는 게 더 오래 갑니다.</h1>
+          <p>
+            눈바디 사진, 식단 메모, 전후 비교를 한곳에 쌓아두고 지난 기록보다 좋아졌는지 자연스럽게 확인하는
+            다이어리입니다.
+          </p>
         </div>
-        <div className="summary-grid">
+
+        <div className="hero-actions">
+          <button className="primary-button" onClick={() => onMove("record")}>
+            오늘 체크인 추가
+          </button>
+          <button className="secondary-button" onClick={() => onMove("compare")}>
+            전후 비교 하러 가기
+          </button>
+        </div>
+      </section>
+
+      <section className="panel stats-panel">
+        <span className="section-label">이번 주 요약</span>
+        <div className="stats-list">
           <article>
             <span>체크인</span>
-            <strong>{weeklySummary.recentRecordCount}회</strong>
+            <strong>{summary.recentRecordCount}회</strong>
           </article>
           <article>
             <span>식단 기록</span>
-            <strong>{weeklySummary.recentMealCount}개</strong>
-          </article>
-          <article>
-            <span>최근 신호</span>
-            <strong>{weeklySummary.latestSignal}</strong>
+            <strong>{summary.recentMealCount}개</strong>
           </article>
           <article>
             <span>평균 몸무게</span>
-            <strong>{weeklySummary.avgWeight ? `${weeklySummary.avgWeight}kg` : "미입력"}</strong>
+            <strong>{summary.averageWeight ? `${summary.averageWeight}kg` : "미입력"}</strong>
+          </article>
+          <article>
+            <span>최근 신호</span>
+            <strong>{summary.latestSignal}</strong>
           </article>
         </div>
       </section>
 
-      <section className="section-card">
-        <div className="section-head">
+      <section className="panel report-panel">
+        <div className="panel-head">
           <div>
-            <span>최근 비교</span>
-            <h2>전후 리포트 미리보기</h2>
+            <span className="section-label">최근 리포트</span>
+            <h2>전후 비교 미리보기</h2>
           </div>
-          <button className="ghost-button" onClick={() => onNavigate("compare")}>
-            비교하러 가기
+          <button className="ghost-button" onClick={() => onMove("compare")}>
+            비교 보기
           </button>
         </div>
 
         {latestReport ? (
-          <div className="report-preview-card">
+          <div className="report-preview">
             <div className="report-preview-head">
               <div>
-                <span className="report-kicker">{latestReport.overall_signal}</span>
+                <span className="eyebrow small">{latestReport.overall_signal}</span>
                 <strong>{latestReport.headline}</strong>
               </div>
               <div className="mini-score">
@@ -217,27 +189,27 @@ function HomeTab({ records, meals, compareHistory, onNavigate }) {
             <p>{latestReport.summary}</p>
           </div>
         ) : (
-          <div className="empty-state compact">
-            <strong>아직 비교 리포트가 없어요.</strong>
-            <small>기록 두 개를 쌓은 뒤 전후 비교 탭에서 바로 리포트를 만들 수 있어요.</small>
+          <div className="empty-box">
+            <strong>아직 전후 비교 리포트가 없어요.</strong>
+            <small>기록 두 개를 쌓으면 변화 문장을 바로 만들어 드립니다.</small>
           </div>
         )}
       </section>
 
-      <section className="section-card">
-        <div className="section-head">
+      <section className="panel span-2">
+        <div className="panel-head">
           <div>
-            <span>최근 체크인</span>
-            <h2>사진 타임라인</h2>
+            <span className="section-label">기록 타임라인</span>
+            <h2>최근 눈바디 기록</h2>
           </div>
         </div>
 
         {records.length ? (
-          <div className="timeline-row">
-            {records.slice(0, 4).map((record) => (
+          <div className="timeline-grid">
+            {records.slice(0, 6).map((record) => (
               <article className="timeline-card" key={record.id}>
                 <div className="timeline-image">
-                  {record.frontImage ? <img src={record.frontImage} alt={`${record.date} 정면 기록`} /> : null}
+                  {record.frontImage ? <img src={record.frontImage} alt={`${record.date} 기록`} /> : null}
                 </div>
                 <strong>{formatShortDate(record.date)}</strong>
                 <small>
@@ -247,27 +219,27 @@ function HomeTab({ records, meals, compareHistory, onNavigate }) {
             ))}
           </div>
         ) : (
-          <div className="empty-state compact">
-            <strong>아직 첫 기록이 없어요.</strong>
-            <small>정면 사진 한 장만 있어도 시작할 수 있어요.</small>
+          <div className="empty-box">
+            <strong>첫 체크인을 아직 안 했어요.</strong>
+            <small>정면 사진 한 장만 올려도 다이어리를 시작할 수 있어요.</small>
           </div>
         )}
       </section>
 
-      <section className="section-card">
-        <div className="section-head">
+      <section className="panel span-2">
+        <div className="panel-head">
           <div>
-            <span>오늘 식단</span>
-            <h2>가볍게 기록한 내용</h2>
+            <span className="section-label">오늘 식단</span>
+            <h2>간단한 식사 메모</h2>
           </div>
-          <button className="ghost-button" onClick={() => onNavigate("meal")}>
-            식단 입력
+          <button className="ghost-button" onClick={() => onMove("meal")}>
+            식단 기록
           </button>
         </div>
 
         {todayMeals.length ? (
           <div className="meal-list">
-            {todayMeals.slice(0, 3).map((meal) => (
+            {todayMeals.slice(0, 4).map((meal) => (
               <article className="meal-card" key={meal.id}>
                 <div>
                   <strong>{meal.type}</strong>
@@ -278,9 +250,9 @@ function HomeTab({ records, meals, compareHistory, onNavigate }) {
             ))}
           </div>
         ) : (
-          <div className="empty-state compact">
-            <strong>오늘 식단 기록이 아직 없어요.</strong>
-            <small>간단한 메모부터 남기면 몸 변화와 연결해서 보기 쉬워집니다.</small>
+          <div className="empty-box">
+            <strong>오늘 식단 메모가 아직 없어요.</strong>
+            <small>식단을 가볍게 적어두면 몸 변화와 연결해서 보기 좋아집니다.</small>
           </div>
         )}
       </section>
@@ -289,11 +261,11 @@ function HomeTab({ records, meals, compareHistory, onNavigate }) {
 }
 
 function RecordTab({ draft, setDraft, onSave, saveError, isSaving, isLimitReached }) {
-  const handleTextChange = (field) => (event) => {
+  const onFieldChange = (field) => (event) => {
     setDraft((current) => ({ ...current, [field]: event.target.value }));
   };
 
-  const handleFileChange = (field) => async (event) => {
+  const onFileChange = (field) => async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
     const dataUrl = await readFileAsDataUrl(file);
@@ -301,11 +273,11 @@ function RecordTab({ draft, setDraft, onSave, saveError, isSaving, isLimitReache
   };
 
   return (
-    <div className="tab-shell">
-      <section className="section-card">
-        <div className="section-head">
+    <div className="content-grid">
+      <section className="panel span-2">
+        <div className="panel-head">
           <div>
-            <span>오늘의 체크인</span>
+            <span className="section-label">오늘의 체크인</span>
             <h2>몸 변화 기록 추가</h2>
           </div>
         </div>
@@ -318,7 +290,7 @@ function RecordTab({ draft, setDraft, onSave, saveError, isSaving, isLimitReache
         <div className="upload-grid">
           <label className="upload-card">
             <span>정면 사진</span>
-            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFileChange("frontImage")} />
+            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={onFileChange("frontImage")} />
             {draft.frontImage ? (
               <img src={draft.frontImage} alt="정면 기록 미리보기" />
             ) : (
@@ -328,19 +300,22 @@ function RecordTab({ draft, setDraft, onSave, saveError, isSaving, isLimitReache
 
           <label className="upload-card">
             <span>측면 사진</span>
-            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFileChange("sideImage")} />
+            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={onFileChange("sideImage")} />
             {draft.sideImage ? (
               <img src={draft.sideImage} alt="측면 기록 미리보기" />
             ) : (
-              <small>가능하면 같은 거리와 조명으로 찍으면 더 좋아요.</small>
+              <small>가능하면 같은 거리, 같은 조명으로 찍으면 더 좋아요.</small>
             )}
           </label>
         </div>
+      </section>
 
-        <div className="field-grid">
+      <section className="panel">
+        <span className="section-label">몸 상태</span>
+        <div className="field-stack">
           <label className="field-card">
             <span>몸무게</span>
-            <input value={draft.weight} onChange={handleTextChange("weight")} placeholder="예: 72.4" />
+            <input value={draft.weight} onChange={onFieldChange("weight")} placeholder="예: 72.4" />
           </label>
 
           <div className="field-card">
@@ -360,32 +335,37 @@ function RecordTab({ draft, setDraft, onSave, saveError, isSaving, isLimitReache
             </div>
           </div>
         </div>
+      </section>
 
-        <label className="field-card full">
-          <span>메모</span>
+      <section className="panel">
+        <span className="section-label">메모</span>
+        <label className="field-card fill-card">
+          <span>오늘의 느낌</span>
           <textarea
+            rows={7}
             value={draft.memo}
-            onChange={handleTextChange("memo")}
-            rows={4}
-            placeholder="오늘 몸 상태나 운동 후 느낌, 식단 메모를 자유롭게 적어 보세요."
+            onChange={onFieldChange("memo")}
+            placeholder="운동 후 느낌, 몸 상태, 식단 메모를 자유롭게 적어 보세요."
           />
         </label>
+      </section>
 
+      <section className="panel span-2">
         <div className="tip-card">
           <strong>촬영 팁</strong>
-          <p>같은 장소, 같은 거리, 비슷한 자세로 찍을수록 전후 비교 결과가 더 안정적으로 나옵니다.</p>
+          <p>같은 장소와 비슷한 자세로 찍을수록 전후 비교 결과가 훨씬 자연스럽고 안정적으로 나옵니다.</p>
         </div>
 
         {isLimitReached ? (
           <div className="paywall-card">
-            <strong>무료 체험 기록 3개를 모두 사용했어요.</strong>
-            <p>정식 버전에서는 로그인 후 기록 무제한, 주간 리포트, 식단 분석 같은 기능으로 이어갈 예정입니다.</p>
+            <strong>무료 기록 3개를 모두 사용했어요.</strong>
+            <p>정식 버전에서는 로그인 후 무제한 기록과 주간 리포트, 식단 분석으로 이어갈 예정입니다.</p>
           </div>
         ) : null}
 
         {saveError ? <p className="status error">{saveError}</p> : null}
 
-        <button className="submit-button" onClick={onSave} disabled={isSaving || isLimitReached}>
+        <button className="primary-button full-width" onClick={onSave} disabled={isSaving || isLimitReached}>
           {isSaving ? "저장 중..." : "오늘 체크인 완료"}
         </button>
       </section>
@@ -411,16 +391,16 @@ function CompareTab({
   const imageField = angle === "측면" ? "sideImage" : "frontImage";
 
   return (
-    <div className="tab-shell">
-      <section className="section-card">
-        <div className="section-head">
+    <div className="content-grid compare-page">
+      <section className="panel compare-form-panel">
+        <div className="panel-head">
           <div>
-            <span>전후 비교</span>
-            <h2>눈바디 변화 리포트</h2>
+            <span className="section-label">전후 비교</span>
+            <h2>사진 선택</h2>
           </div>
         </div>
 
-        <div className="field-grid">
+        <div className="field-stack">
           <label className="field-card">
             <span>이전 기록</span>
             <select value={beforeId} onChange={(event) => setBeforeId(event.target.value)}>
@@ -442,45 +422,60 @@ function CompareTab({
               ))}
             </select>
           </label>
+
+          <label className="field-card">
+            <span>비교 각도</span>
+            <select value={angle} onChange={(event) => setAngle(event.target.value)}>
+              <option value="정면">정면</option>
+              <option value="측면">측면</option>
+            </select>
+          </label>
         </div>
-
-        <label className="field-card full">
-          <span>비교 각도</span>
-          <select value={angle} onChange={(event) => setAngle(event.target.value)}>
-            <option value="정면">정면</option>
-            <option value="측면">측면</option>
-          </select>
-        </label>
-
-        {beforeRecord?.[imageField] && afterRecord?.[imageField] ? (
-          <div className="compare-preview-grid">
-            <div className="compare-shot">
-              <span>이전</span>
-              <img src={beforeRecord[imageField]} alt="이전 기록 미리보기" />
-            </div>
-            <div className="compare-shot">
-              <span>최근</span>
-              <img src={afterRecord[imageField]} alt="최근 기록 미리보기" />
-            </div>
-          </div>
-        ) : null}
 
         {compareError ? <p className="status error">{compareError}</p> : null}
 
-        <button className="submit-button" onClick={onAnalyze} disabled={isAnalyzing || records.length < 2}>
+        <button className="primary-button full-width" onClick={onAnalyze} disabled={isAnalyzing || records.length < 2}>
           {isAnalyzing ? "분석 중..." : "변화 리포트 만들기"}
         </button>
       </section>
 
+      <section className="panel compare-preview-panel">
+        <div className="panel-head">
+          <div>
+            <span className="section-label">선택한 사진</span>
+            <h2>전후 미리보기</h2>
+          </div>
+        </div>
+
+        {beforeRecord?.[imageField] && afterRecord?.[imageField] ? (
+          <div className="compare-preview-stack">
+            <article className="compare-shot-card">
+              <span>이전 기록</span>
+              <img src={beforeRecord[imageField]} alt="이전 사진 미리보기" />
+              <strong>{beforeRecord.date}</strong>
+            </article>
+            <article className="compare-shot-card">
+              <span>최근 기록</span>
+              <img src={afterRecord[imageField]} alt="최근 사진 미리보기" />
+              <strong>{afterRecord.date}</strong>
+            </article>
+          </div>
+        ) : (
+          <div className="empty-box">
+            <strong>사진 두 장을 고르면 여기에서 미리보기가 보여요.</strong>
+            <small>모바일에서도 잘리지 않도록 세로 카드 형태로 바꿔두었습니다.</small>
+          </div>
+        )}
+      </section>
+
       {compareResult ? (
-        <section className="report-shell">
+        <section className="panel span-2 report-result-panel">
           <div className="report-hero">
             <div>
-              <span className="report-kicker">{compareResult.overall_signal}</span>
+              <span className="eyebrow small">{compareResult.overall_signal}</span>
               <h2>{compareResult.headline}</h2>
               <p>{compareResult.summary}</p>
             </div>
-
             <div className="score-card">
               <span>변화 신호</span>
               <strong>
@@ -529,10 +524,10 @@ function CompareTab({
           </div>
         </section>
       ) : (
-        <section className="section-card">
-          <div className="empty-state">
-            <strong>기록 두 개를 고른 뒤 전후 비교를 시작해 보세요.</strong>
-            <small>같은 자세, 같은 거리, 같은 각도의 사진일수록 결과가 더 자연스럽습니다.</small>
+        <section className="panel span-2">
+          <div className="empty-box">
+            <strong>전후 리포트는 비교 버튼을 누르면 아래에 생성됩니다.</strong>
+            <small>같은 각도와 비슷한 자세의 사진일수록 결과가 더 믿을 만해요.</small>
           </div>
         </section>
       )}
@@ -545,29 +540,32 @@ function MealTab({ meals, mealDraft, setMealDraft, onAddMeal }) {
   const todayMeals = meals.filter((meal) => meal.date === today);
   const todayCalories = todayMeals.reduce((total, meal) => total + (Number(meal.calories) || 0), 0);
 
-  const handleDraftChange = (field) => (event) => {
+  const onFieldChange = (field) => (event) => {
     setMealDraft((current) => ({ ...current, [field]: event.target.value }));
   };
 
   return (
-    <div className="tab-shell">
-      <section className="section-card">
-        <div className="section-head">
+    <div className="content-grid">
+      <section className="panel">
+        <span className="section-label">오늘 누적</span>
+        <div className="date-banner">
+          <span>오늘 칼로리</span>
+          <strong>{todayCalories} kcal</strong>
+        </div>
+      </section>
+
+      <section className="panel span-2">
+        <div className="panel-head">
           <div>
-            <span>오늘의 식단</span>
-            <h2>가볍게 먹은 것 기록하기</h2>
+            <span className="section-label">식단 입력</span>
+            <h2>가볍게 메모 남기기</h2>
           </div>
         </div>
 
-        <div className="date-banner">
-          <span>오늘 누적 칼로리</span>
-          <strong>{todayCalories} kcal</strong>
-        </div>
-
-        <div className="field-grid">
+        <div className="meal-form-grid">
           <label className="field-card">
             <span>식사 구분</span>
-            <select value={mealDraft.type} onChange={handleDraftChange("type")}>
+            <select value={mealDraft.type} onChange={onFieldChange("type")}>
               {mealTypes.map((type) => (
                 <option key={type} value={type}>
                   {type}
@@ -578,30 +576,30 @@ function MealTab({ meals, mealDraft, setMealDraft, onAddMeal }) {
 
           <label className="field-card">
             <span>칼로리</span>
-            <input value={mealDraft.calories} onChange={handleDraftChange("calories")} placeholder="예: 540" />
+            <input value={mealDraft.calories} onChange={onFieldChange("calories")} placeholder="예: 540" />
+          </label>
+
+          <label className="field-card meal-note-card">
+            <span>식단 메모</span>
+            <textarea
+              rows={4}
+              value={mealDraft.note}
+              onChange={onFieldChange("note")}
+              placeholder="먹은 음식, 양, 만족감 같은 메모를 적어 보세요."
+            />
           </label>
         </div>
 
-        <label className="field-card full">
-          <span>식단 메모</span>
-          <textarea
-            rows={3}
-            value={mealDraft.note}
-            onChange={handleDraftChange("note")}
-            placeholder="먹은 음식, 양, 만족감 같은 메모를 적어 보세요."
-          />
-        </label>
-
-        <button className="submit-button" onClick={onAddMeal}>
+        <button className="primary-button" onClick={onAddMeal}>
           식단 기록 추가
         </button>
       </section>
 
-      <section className="section-card">
-        <div className="section-head">
+      <section className="panel span-2">
+        <div className="panel-head">
           <div>
-            <span>오늘 기록</span>
-            <h2>식사 타임라인</h2>
+            <span className="section-label">오늘 타임라인</span>
+            <h2>기록한 식사</h2>
           </div>
         </div>
 
@@ -618,9 +616,9 @@ function MealTab({ meals, mealDraft, setMealDraft, onAddMeal }) {
             ))}
           </div>
         ) : (
-          <div className="empty-state compact">
+          <div className="empty-box">
             <strong>오늘 식단이 아직 비어 있어요.</strong>
-            <small>간단한 메모만 적어도 나중에 몸 변화와 연결해 보기 쉬워집니다.</small>
+            <small>간단하게 적어도 주간 리포트의 맥락이 좋아집니다.</small>
           </div>
         )}
       </section>
@@ -629,27 +627,26 @@ function MealTab({ meals, mealDraft, setMealDraft, onAddMeal }) {
 }
 
 function ProfileTab({ records, meals, compareHistory, onReset }) {
-  const weeklySummary = calculateWeeklySummary(records, meals, compareHistory);
   const isFreeLimitReached = records.length >= FREE_RECORD_LIMIT;
 
   return (
-    <div className="tab-shell">
-      <section className="section-card profile-hero">
-        <div>
-          <span>현재 플랜</span>
-          <h2>무료 체험 중</h2>
-          <p>지금은 기기 안에만 저장되는 MVP 버전입니다. 기록이 쌓이는 감각과 전후 비교 흐름을 먼저 테스트하는 단계예요.</p>
-        </div>
-      </section>
-
-      <section className="section-card">
-        <div className="section-head">
+    <div className="content-grid">
+      <section className="panel span-2">
+        <div className="panel-head">
           <div>
-            <span>사용 현황</span>
-            <h2>내 다이어리 통계</h2>
+            <span className="section-label">현재 상태</span>
+            <h2>무료 체험 MVP</h2>
           </div>
         </div>
-        <div className="summary-grid">
+        <p className="muted-copy">
+          지금은 기기 안에만 저장되는 테스트 단계입니다. 다음 버전에서 로그인, 서버 저장, 결제, 주간 리포트까지
+          확장할 수 있도록 구조를 잡고 있습니다.
+        </p>
+      </section>
+
+      <section className="panel">
+        <span className="section-label">사용 현황</span>
+        <div className="stats-list">
           <article>
             <span>사진 기록</span>
             <strong>
@@ -664,20 +661,11 @@ function ProfileTab({ records, meals, compareHistory, onReset }) {
             <span>비교 리포트</span>
             <strong>{compareHistory.length}개</strong>
           </article>
-          <article>
-            <span>연속 기록</span>
-            <strong>{weeklySummary.streak}일</strong>
-          </article>
         </div>
       </section>
 
-      <section className="section-card">
-        <div className="section-head">
-          <div>
-            <span>출시 방향</span>
-            <h2>프리미엄에서 들어갈 기능</h2>
-          </div>
-        </div>
+      <section className="panel">
+        <span className="section-label">프리미엄 방향</span>
         <div className="feature-list">
           <div className="feature-row">
             <strong>무료</strong>
@@ -685,24 +673,18 @@ function ProfileTab({ records, meals, compareHistory, onReset }) {
           </div>
           <div className="feature-row">
             <strong>유료</strong>
-            <p>기록 무제한, AI 눈바디 분석, 식단 분석, 주간·월간 리포트, 공유 카드</p>
+            <p>기록 무제한, AI 분석, 식단 분석, 주간 리포트, 공유 카드</p>
           </div>
-        </div>
-        <div className="paywall-card">
-          <strong>{isFreeLimitReached ? "업그레이드 유도가 자연스럽게 필요한 상태예요." : "지금은 무료 체험 단계예요."}</strong>
-          <p>다음 단계에서는 구글 로그인, 서버 저장, 결제, 누적 타임라인까지 붙여서 진짜 서비스처럼 확장할 수 있습니다.</p>
         </div>
       </section>
 
-      <section className="section-card">
-        <div className="section-head">
-          <div>
-            <span>테스트용 관리</span>
-            <h2>로컬 데이터 초기화</h2>
-          </div>
+      <section className="panel span-2">
+        <div className="paywall-card">
+          <strong>{isFreeLimitReached ? "이제는 업그레이드 동선이 필요한 상태예요." : "아직은 무료 체험을 써보는 단계예요."}</strong>
+          <p>다음 단계에서 구글 로그인과 서버 저장을 붙이면 기기 바뀌어도 기록이 유지되는 진짜 서비스가 됩니다.</p>
         </div>
-        <p className="muted-copy">지금은 기기 저장만 쓰고 있으니, 테스트를 다시 시작하고 싶을 때 전체 기록을 지울 수 있게 해두었습니다.</p>
-        <button className="secondary-button danger" onClick={onReset}>
+
+        <button className="secondary-button danger full-width" onClick={onReset}>
           이 기기 데이터 초기화
         </button>
       </section>
@@ -764,11 +746,7 @@ export default function HomePage() {
     }
   }, [records]);
 
-  const recordsById = useMemo(
-    () => Object.fromEntries(records.map((record) => [record.id, record])),
-    [records]
-  );
-
+  const recordMap = useMemo(() => Object.fromEntries(records.map((record) => [record.id, record])), [records]);
   const isLimitReached = records.length >= FREE_RECORD_LIMIT;
 
   const saveRecord = async () => {
@@ -785,35 +763,37 @@ export default function HomePage() {
     setIsSaving(true);
     setSaveError("");
 
-    const newRecord = {
-      id: crypto.randomUUID(),
-      ...recordDraft
-    };
+    setRecords((current) => [
+      {
+        id: crypto.randomUUID(),
+        ...recordDraft
+      },
+      ...current
+    ]);
 
-    setRecords((current) => [newRecord, ...current]);
     setRecordDraft(initialRecordDraft());
     setIsSaving(false);
     setActiveTab("home");
   };
 
   const addMeal = () => {
-    if (!mealDraft.note.trim()) {
-      return;
-    }
+    if (!mealDraft.note.trim()) return;
 
-    const entry = {
-      id: crypto.randomUUID(),
-      date: formatDate(),
-      ...mealDraft
-    };
+    setMeals((current) => [
+      {
+        id: crypto.randomUUID(),
+        date: formatDate(),
+        ...mealDraft
+      },
+      ...current
+    ]);
 
-    setMeals((current) => [entry, ...current]);
     setMealDraft(initialMealDraft);
   };
 
   const analyzeCompare = async () => {
-    const beforeRecord = recordsById[beforeId];
-    const afterRecord = recordsById[afterId];
+    const beforeRecord = recordMap[beforeId];
+    const afterRecord = recordMap[afterId];
 
     if (!beforeRecord || !afterRecord) {
       setCompareError("비교할 기록 두 개를 먼저 골라 주세요.");
@@ -830,18 +810,17 @@ export default function HomePage() {
     setCompareResult(null);
 
     try {
-      const formData = buildComparePayload(beforeRecord, afterRecord, angle);
       const response = await fetch(`${API_BASE_URL}/analyze-progress`, {
         method: "POST",
-        body: formData
+        body: buildComparePayload(beforeRecord, afterRecord, angle)
       });
-      const payload = await response.json();
 
+      const payload = await response.json();
       if (!response.ok) {
         throw new Error(payload.detail || "비교 리포트를 만들지 못했습니다.");
       }
 
-      const historyEntry = {
+      const entry = {
         id: crypto.randomUUID(),
         createdAt: new Date().toISOString(),
         beforeId,
@@ -850,8 +829,8 @@ export default function HomePage() {
         ...payload
       };
 
-      setCompareResult(historyEntry);
-      setCompareHistory((current) => [historyEntry, ...current].slice(0, 20));
+      setCompareResult(entry);
+      setCompareHistory((current) => [entry, ...current].slice(0, 20));
     } catch (error) {
       setCompareError(error.message || "비교 분석 중 오류가 발생했습니다.");
     } finally {
@@ -872,54 +851,68 @@ export default function HomePage() {
 
   return (
     <main className="app-shell">
-      <div className="phone-frame">
-        {activeTab === "home" ? (
-          <HomeTab records={records} meals={meals} compareHistory={compareHistory} onNavigate={setActiveTab} />
-        ) : null}
+      <div className="app-frame">
+        <header className="top-header">
+          <div>
+            <span className="section-label">눈바디 변화 다이어리</span>
+            <h1>몸 변화 추적</h1>
+          </div>
+          <p>모바일에서는 세로 흐름, 웹에서는 넓은 레이아웃으로 보이도록 정리한 버전입니다.</p>
+        </header>
 
-        {activeTab === "record" ? (
-          <RecordTab
-            draft={recordDraft}
-            setDraft={setRecordDraft}
-            onSave={saveRecord}
-            saveError={saveError}
-            isSaving={isSaving}
-            isLimitReached={isLimitReached}
-          />
-        ) : null}
+        <div className="desktop-nav-wrap">
+          <nav className="tab-nav">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                className={activeTab === tab.id ? "tab-button active" : "tab-button"}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        </div>
 
-        {activeTab === "compare" ? (
-          <CompareTab
-            records={records}
-            beforeId={beforeId}
-            afterId={afterId}
-            angle={angle}
-            setBeforeId={setBeforeId}
-            setAfterId={setAfterId}
-            setAngle={setAngle}
-            onAnalyze={analyzeCompare}
-            compareError={compareError}
-            compareResult={compareResult}
-            isAnalyzing={isAnalyzing}
-          />
-        ) : null}
-
-        {activeTab === "meal" ? (
-          <MealTab meals={meals} mealDraft={mealDraft} setMealDraft={setMealDraft} onAddMeal={addMeal} />
-        ) : null}
-
-        {activeTab === "profile" ? (
-          <ProfileTab records={records} meals={meals} compareHistory={compareHistory} onReset={resetLocalData} />
-        ) : null}
+        <div className="page-body">
+          {activeTab === "home" ? <HomeTab records={records} meals={meals} compareHistory={compareHistory} onMove={setActiveTab} /> : null}
+          {activeTab === "record" ? (
+            <RecordTab
+              draft={recordDraft}
+              setDraft={setRecordDraft}
+              onSave={saveRecord}
+              saveError={saveError}
+              isSaving={isSaving}
+              isLimitReached={isLimitReached}
+            />
+          ) : null}
+          {activeTab === "compare" ? (
+            <CompareTab
+              records={records}
+              beforeId={beforeId}
+              afterId={afterId}
+              angle={angle}
+              setBeforeId={setBeforeId}
+              setAfterId={setAfterId}
+              setAngle={setAngle}
+              onAnalyze={analyzeCompare}
+              compareError={compareError}
+              compareResult={compareResult}
+              isAnalyzing={isAnalyzing}
+            />
+          ) : null}
+          {activeTab === "meal" ? <MealTab meals={meals} mealDraft={mealDraft} setMealDraft={setMealDraft} onAddMeal={addMeal} /> : null}
+          {activeTab === "profile" ? <ProfileTab records={records} meals={meals} compareHistory={compareHistory} onReset={resetLocalData} /> : null}
+        </div>
 
         <nav className="bottom-nav">
-          {tabItems.map((item) => (
+          {tabs.map((tab) => (
             <button
-              key={item.id}
-              className={item.id === activeTab ? "nav-item active" : "nav-item"}
-              onClick={() => setActiveTab(item.id)}
+              key={tab.id}
+              className={activeTab === tab.id ? "bottom-nav-button active" : "bottom-nav-button"}
+              onClick={() => setActiveTab(tab.id)}
             >
-              <span>{item.label}</span>
+              {tab.label}
             </button>
           ))}
         </nav>
