@@ -2,6 +2,8 @@
 
 Full-stack web app that estimates body fat percentage from a front or side body image.
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/pringe-rgb/body-fat-estimator)
+
 ## Project structure
 
 ```text
