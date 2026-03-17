@@ -8,7 +8,7 @@ services:
     healthCheckPath: /health
     envVars:
       - key: CORS_ALLOW_ORIGINS
-        value: https://body-fat-estimator-web.onrender.com
+        value: "*"
   - type: static
     name: body-fat-estimator-web
     rootDir: frontend

@@ -20,10 +20,14 @@ def _get_allowed_origins() -> list[str]:
         return [origin.strip() for origin in raw.split(",") if origin.strip()]
     return ["http://localhost:3000", "http://127.0.0.1:3000"]
 
+
+allowed_origins = _get_allowed_origins()
+allow_credentials = "*" not in allowed_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_get_allowed_origins(),
-    allow_credentials=True,
+    allow_origins=allowed_origins,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
