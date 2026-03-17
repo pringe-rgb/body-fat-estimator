@@ -9,8 +9,9 @@ services:
     envVars:
       - key: CORS_ALLOW_ORIGINS
         value: "*"
-  - type: static
+  - type: web
     name: body-fat-estimator-web
+    runtime: static
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: out
