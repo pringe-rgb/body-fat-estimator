@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 
@@ -146,34 +146,43 @@ function localizeConfidenceLabel(value) {
   return value || "신뢰도 보통";
 }
 
+function getSignalCode(payload = {}) {
+  return payload.signal_code || payload.overall_signal || "";
+}
+
+function getConfidenceCode(payload = {}) {
+  return payload.confidence_code || payload.confidence || "";
+}
+
 function localizeSignal(value) {
   const normalized = String(value || "").toLowerCase();
-  if (normalized.includes("strong improvement")) return "좋아지는 흐름이 분명해요";
-  if (normalized.includes("moderate improvement")) return "전반적으로 좋아지는 흐름이에요";
-  if (normalized.includes("reverse trend")) return "예전보다 흐름이 조금 무너졌어요";
-  if (normalized.includes("slight regression")) return "약간 둔해진 변화가 보여요";
-  if (normalized.includes("mostly stable")) return "전체적으로 비슷한 흐름이에요";
+  if (normalized.includes("strong_improvement") || normalized.includes("strong improvement")) return "좋아지는 흐름이 분명해요";
+  if (normalized.includes("moderate_improvement") || normalized.includes("moderate improvement")) return "전반적으로 좋아지는 흐름이에요";
+  if (normalized.includes("reverse_trend") || normalized.includes("reverse trend")) return "예전보다 흐름이 조금 무너졌어요";
+  if (normalized.includes("slight_regression") || normalized.includes("slight regression")) return "약간 둔해진 변화가 보여요";
+  if (normalized.includes("mostly_stable") || normalized.includes("mostly stable")) return "전체적으로 비슷한 흐름이에요";
   return value || "변화 분석";
 }
 
-function localizeHeadline(value) {
+function localizeHeadline(value, signalCode) {
   const normalized = String(value || "").toLowerCase();
-  if (normalized.includes("clear tightening trend")) return "눈에 띄게 정리된 흐름이 보여요";
-  if (normalized.includes("solid visual progress")) return "사진상 좋아진 흐름이 보여요";
-  if (normalized.includes("visible reverse trend")) return "이전보다 둔한 흐름이 보여요";
-  if (normalized.includes("mixed result with some softness")) return "좋아진 부분과 아쉬운 부분이 함께 보여요";
-  if (normalized.includes("body shape looks mostly stable")) return "전체적으로 비슷한 상태로 보여요";
+  const normalizedSignal = String(signalCode || "").toLowerCase();
+  if (normalized.includes("clear tightening trend") || normalizedSignal.includes("strong_improvement")) return "눈에 띄게 정리된 흐름이 보여요";
+  if (normalized.includes("solid visual progress") || normalizedSignal.includes("moderate_improvement")) return "사진상 좋아진 흐름이 보여요";
+  if (normalized.includes("visible reverse trend") || normalizedSignal.includes("reverse_trend")) return "이전보다 둔한 흐름이 보여요";
+  if (normalized.includes("mixed result with some softness") || normalizedSignal.includes("slight_regression")) return "좋아진 부분과 아쉬운 부분이 함께 보여요";
+  if (normalized.includes("body shape looks mostly stable") || normalizedSignal.includes("mostly_stable")) return "전체적으로 비슷한 상태로 보여요";
   return value || "눈바디 변화 리포트";
 }
 
-function localizeMetricLabel(label) {
-  const normalized = String(label || "").toLowerCase();
-  if (normalized.includes("waist line")) return "허리선";
-  if (normalized.includes("v-taper")) return "상체 라인";
-  if (normalized.includes("waist-to-hip balance")) return "허리-골반 밸런스";
-  if (normalized.includes("lower-body definition")) return "하체 밸런스";
-  if (normalized.includes("abdomen projection")) return "복부 돌출감";
-  return label || "변화 지표";
+function localizeMetricLabel(value) {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized.includes("waist_line") || normalized.includes("waist line")) return "허리선";
+  if (normalized.includes("v_taper") || normalized.includes("v-taper")) return "상체 라인";
+  if (normalized.includes("waist_to_hip_balance") || normalized.includes("waist-to-hip balance")) return "허리-골반 밸런스";
+  if (normalized.includes("lower_body_definition") || normalized.includes("lower-body definition")) return "하체 밸런스";
+  if (normalized.includes("abdomen_projection") || normalized.includes("abdomen projection")) return "복부 돌출감";
+  return value || "변화 지표";
 }
 
 function buildLocalizedMetricSummary(label, changePercent) {
@@ -188,8 +197,8 @@ function buildLocalizedMetricSummary(label, changePercent) {
   }
 
   if (label === "상체 라인") {
-    if (positive) return `어깨 대비 허리 비율이 좋아져 상체 라인이 ${amount}% 정도 또렷해 보여요.`;
-    if (negative) return `상체 대비 허리 라인이 이전보다 ${amount}% 정도 덜 또렷하게 읽혀요.`;
+    if (positive) return `어깨 대비 허리 비율이 좋아져 상체 라인이 ${amount}% 정도 더 또렷해 보여요.`;
+    if (negative) return `상체 대비 허리 라인이 이전보다 ${amount}% 정도 덜 또렷하게 보여요.`;
     return "상체 라인은 전후 사진에서 크게 달라 보이지 않아요.";
   }
 
@@ -200,7 +209,7 @@ function buildLocalizedMetricSummary(label, changePercent) {
   }
 
   if (label === "하체 밸런스") {
-    if (positive) return `하체 대비 허리 비율이 ${amount}% 정도 좋아져 전체 밸런스가 나아 보여요.`;
+    if (positive) return `하체 대비 허리 비율이 ${amount}% 정도 좋아져 전체 밸런스가 더 나아 보여요.`;
     if (negative) return `하체 밸런스가 이전보다 ${amount}% 정도 덜 선명하게 보일 수 있어요.`;
     return "하체 밸런스는 큰 차이 없이 비슷해 보여요.";
   }
@@ -216,41 +225,59 @@ function buildLocalizedMetricSummary(label, changePercent) {
 
 function buildLocalizedSummary(changeScore) {
   if (changeScore >= 7) {
-    return "이전 사진과 비교하면 최근 사진에서 전체 라인이 더 정리된 흐름으로 보여요. 특히 허리선과 상체 비율 변화가 좋게 읽혔어요.";
+    return "이전 사진과 비교하면 최근 사진에서 전체 라인이 더 정리된 흐름으로 보여요. 특히 허리선과 상체 비율 변화가 좋게 읽혀요.";
   }
   if (changeScore >= 2) {
-    return "전반적으로는 좋아지는 흐름이 보이지만, 극적인 차이라기보다 서서히 정리되는 느낌에 가까워요.";
+    return "전반적으로는 좋아지는 흐름이 보이지만 극적인 차이보다는 서서히 정리되는 쪽에 가까워요.";
   }
   if (changeScore <= -7) {
     return "이전 사진보다 최근 사진에서 라인이 덜 정리돼 보이는 신호가 있어요. 촬영 조건 차이도 함께 확인해 보는 게 좋아요.";
   }
   if (changeScore <= -2) {
-    return "조금 둔해진 변화가 읽히지만, 자세나 거리 차이의 영향도 함께 있을 수 있어요.";
+    return "조금 둔해진 변화가 보이지만 자세나 거리 차이의 영향도 함께 있을 수 있어요.";
   }
   return "전후 사진을 비교했을 때 전체적으로는 비슷한 흐름으로 보여요. 큰 변화보다는 유지에 가까운 상태예요.";
 }
 
-function localizeNotes(notes, confidence) {
-  const localized = [
-    "같은 자세, 같은 거리, 같은 조명으로 찍을수록 전후 비교가 더 자연스럽고 믿을 만해집니다.",
-    "이 리포트는 몸 변화의 방향을 보는 용도에 적합하고, 의료용 체지방 측정값을 대신하진 않아요."
-  ];
+function localizeViewLabel(value) {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized.includes("side")) return "측면";
+  return "정면";
+}
 
-  if (String(confidence).includes("낮음") || String(confidence).toLowerCase().includes("low")) {
-    localized.push("이번 비교는 사진 인식 신호가 약해서 신뢰도가 낮아요. 전신이 더 잘 보이는 사진이면 결과가 더 안정적입니다.");
+function localizeNotes(notes, confidenceCode) {
+  const noteMap = {
+    keep_pose_consistent: "같은 자세, 같은 거리, 같은 조명으로 찍을수록 전후 비교가 더 자연스럽고 믿을 만해집니다.",
+    report_is_directional: "이 리포트는 몸 변화의 방향을 보는 용도에 적합하고, 의료용 체지방 측정값을 대신하지 않습니다.",
+    low_confidence_photo: "이번 비교는 사진 인식 신호가 약해 신뢰도가 낮아요. 전신이 더 잘 보이는 사진이면 결과가 더 안정적입니다."
+  };
+
+  if (!Array.isArray(notes) || notes.length === 0) {
+    const fallback = [noteMap.keep_pose_consistent, noteMap.report_is_directional];
+    if (String(confidenceCode).toLowerCase().includes("low") || String(confidenceCode).includes("낮음")) {
+      fallback.push(noteMap.low_confidence_photo);
+    }
+    return fallback;
   }
 
-  if (Array.isArray(notes) && notes.length > 2) {
-    return localized.concat(notes.slice(2));
-  }
+  return notes.map((note) => noteMap[note] || note);
+}
 
-  return localized;
+function localizeSnapshot(snapshot = {}) {
+  return {
+    ...snapshot,
+    view: localizeViewLabel(snapshot.view || snapshot.view_code || snapshot.view_type),
+    v_taper: snapshot.v_taper ?? snapshot.v_taper_ratio,
+    waist_to_hip: snapshot.waist_to_hip ?? snapshot.waist_to_hip_ratio
+  };
 }
 
 function localizeProgressPayload(payload) {
-  const localizedConfidence = localizeConfidenceLabel(payload.confidence);
+  const signalCode = getSignalCode(payload);
+  const confidenceCode = getConfidenceCode(payload);
+  const localizedConfidence = localizeConfidenceLabel(confidenceCode);
   const localizedMetrics = (payload.metrics || []).map((metric) => {
-    const localizedLabel = localizeMetricLabel(metric.label);
+    const localizedLabel = localizeMetricLabel(metric.code || metric.label);
     return {
       ...metric,
       label: localizedLabel,
@@ -260,23 +287,18 @@ function localizeProgressPayload(payload) {
 
   return {
     ...payload,
-    overall_signal: localizeSignal(payload.overall_signal),
-    headline: localizeHeadline(payload.headline),
+    signal_code: signalCode,
+    confidence_code: confidenceCode,
+    overall_signal: localizeSignal(signalCode),
+    headline: localizeHeadline(payload.headline, signalCode),
     summary: buildLocalizedSummary(payload.change_score),
     confidence: localizedConfidence,
     metrics: localizedMetrics,
-    notes: localizeNotes(payload.notes, localizedConfidence),
-    before_snapshot: {
-      ...payload.before_snapshot,
-      view: payload.before_snapshot?.view || payload.before_snapshot?.view_type || "정면"
-    },
-    after_snapshot: {
-      ...payload.after_snapshot,
-      view: payload.after_snapshot?.view || payload.after_snapshot?.view_type || "정면"
-    }
+    notes: localizeNotes(payload.notes, confidenceCode),
+    before_snapshot: localizeSnapshot(payload.before_snapshot),
+    after_snapshot: localizeSnapshot(payload.after_snapshot)
   };
 }
-
 function HomeTab({ records, meals, compareHistory, onMove }) {
   const summary = buildWeeklySummary(records, meals, compareHistory);
   const today = formatDate();
@@ -660,14 +682,14 @@ function CompareTab({
             <article className="snapshot-card">
               <span>이전 스냅샷</span>
               <strong>{compareResult.before_snapshot?.view || angle}</strong>
-              <small>V-taper {compareResult.before_snapshot?.v_taper}</small>
-              <small>Waist/Hip {compareResult.before_snapshot?.waist_to_hip}</small>
+              <small>상체 비율 {compareResult.before_snapshot?.v_taper}</small>
+              <small>허리/골반 {compareResult.before_snapshot?.waist_to_hip}</small>
             </article>
             <article className="snapshot-card">
               <span>최근 스냅샷</span>
               <strong>{compareResult.after_snapshot?.view || angle}</strong>
-              <small>V-taper {compareResult.after_snapshot?.v_taper}</small>
-              <small>Waist/Hip {compareResult.after_snapshot?.waist_to_hip}</small>
+              <small>상체 비율 {compareResult.after_snapshot?.v_taper}</small>
+              <small>허리/골반 {compareResult.after_snapshot?.waist_to_hip}</small>
             </article>
           </div>
 
@@ -1096,3 +1118,4 @@ export default function HomePage() {
     </main>
   );
 }
+

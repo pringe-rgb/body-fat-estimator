@@ -16,7 +16,7 @@ mp_pose = mp.solutions.pose
 @dataclass
 class BodySnapshot:
     view_type: str
-    confidence: str
+    confidence_code: str
     visibility: float
     shoulder_width: float
     hip_width: float
@@ -34,18 +34,15 @@ class BodySnapshot:
 
 @dataclass
 class ProgressMetric:
-    label: str
+    code: str
     direction: str
     change_percent: float
-    summary: str
 
 
 @dataclass
 class ProgressAnalysis:
-    headline: str
-    summary: str
-    overall_signal: str
-    confidence: str
+    signal_code: str
+    confidence_code: str
     view_type: str
     change_score: float
     before_snapshot: BodySnapshot
@@ -124,7 +121,7 @@ def _direction_from_delta(delta: float, threshold: float = 1.5) -> str:
     return "flat"
 
 
-def _confidence_label(visibility: float, has_mask: bool) -> str:
+def _confidence_code(visibility: float, has_mask: bool) -> str:
     if visibility >= 0.82 and has_mask:
         return "high"
     if visibility >= 0.68:
@@ -132,28 +129,16 @@ def _confidence_label(visibility: float, has_mask: bool) -> str:
     return "low"
 
 
-def _signal_label(change_score: float) -> str:
+def _signal_code(change_score: float) -> str:
     if change_score >= 7:
-        return "strong improvement"
+        return "strong_improvement"
     if change_score >= 2:
-        return "moderate improvement"
+        return "moderate_improvement"
     if change_score <= -7:
-        return "reverse trend"
+        return "reverse_trend"
     if change_score <= -2:
-        return "slight regression"
-    return "mostly stable"
-
-
-def _signal_headline(change_score: float) -> str:
-    if change_score >= 7:
-        return "Clear tightening trend"
-    if change_score >= 2:
-        return "Solid visual progress"
-    if change_score <= -7:
-        return "Visible reverse trend"
-    if change_score <= -2:
-        return "Mixed result with some softness"
-    return "Body shape looks mostly stable"
+        return "slight_regression"
+    return "mostly_stable"
 
 
 def _ratio_change(before: float, after: float) -> float:
@@ -162,30 +147,17 @@ def _ratio_change(before: float, after: float) -> float:
     return round(((after - before) / before) * 100, 1)
 
 
-def _build_metric(label: str, before: float, after: float, prefer_lower: bool, unit_hint: str) -> ProgressMetric:
+def _build_metric(code: str, before: float, after: float, prefer_lower: bool) -> ProgressMetric:
     raw_change = _ratio_change(before, after)
     effective_change = -raw_change if prefer_lower else raw_change
     direction = _direction_from_delta(effective_change)
-
-    if direction == "up":
-        tone = "improved"
-    elif direction == "down":
-        tone = "moved backward"
-    else:
-        tone = "stayed fairly similar"
-
-    summary = f"{label} {tone} by {abs(raw_change):.1f}% based on the {unit_hint} ratio."
-
-    return ProgressMetric(
-        label=label,
-        direction=direction,
-        change_percent=round(effective_change, 1),
-        summary=summary,
-    )
+    return ProgressMetric(code=code, direction=direction, change_percent=round(effective_change, 1))
 
 
 def _snapshot_dict(snapshot: BodySnapshot) -> dict:
-    return asdict(snapshot)
+    payload = asdict(snapshot)
+    payload["view_code"] = payload.pop("view_type")
+    return payload
 
 
 def _metrics_dict(metrics: list[ProgressMetric]) -> list[dict]:
@@ -268,11 +240,9 @@ def analyze_body_image(image_bgr: np.ndarray) -> BodySnapshot:
     torso_to_leg_ratio = _clamp_ratio(torso_height / max(leg_length, 1e-6), 0.55, 1.3)
     abdomen_projection = _clamp_ratio(abs(shoulder_mid_x - hip_mid_x) / torso_height, 0.0, 0.45)
 
-    silhouette_confidence = "good" if segmentation_mask is not None else "limited"
-
     return BodySnapshot(
         view_type=view_type,
-        confidence=_confidence_label(visibility, segmentation_mask is not None),
+        confidence_code=_confidence_code(visibility, segmentation_mask is not None),
         visibility=visibility,
         shoulder_width=round(shoulder_width, 4),
         hip_width=round(hip_width, 4),
@@ -285,7 +255,7 @@ def analyze_body_image(image_bgr: np.ndarray) -> BodySnapshot:
         waist_to_hip_ratio=round(waist_to_hip_ratio, 3),
         torso_to_leg_ratio=round(torso_to_leg_ratio, 3),
         abdomen_projection=round(abdomen_projection, 3),
-        silhouette_confidence=silhouette_confidence,
+        silhouette_confidence="good" if segmentation_mask is not None else "limited",
     )
 
 
@@ -297,53 +267,38 @@ def analyze_progress(before_image_bgr: np.ndarray, after_image_bgr: np.ndarray) 
         raise ValueError("Before and after photos should use the same angle. Please upload matching front/front or side/side photos.")
 
     metrics = [
-        _build_metric("Waist line", before.waist_width, after.waist_width, prefer_lower=True, unit_hint="waist silhouette"),
-        _build_metric("V-taper", before.v_taper_ratio, after.v_taper_ratio, prefer_lower=False, unit_hint="shoulder-to-waist"),
-        _build_metric("Waist-to-hip balance", before.waist_to_hip_ratio, after.waist_to_hip_ratio, prefer_lower=True, unit_hint="waist-to-hip"),
+        _build_metric("waist_line", before.waist_width, after.waist_width, prefer_lower=True),
+        _build_metric("v_taper", before.v_taper_ratio, after.v_taper_ratio, prefer_lower=False),
+        _build_metric("waist_to_hip_balance", before.waist_to_hip_ratio, after.waist_to_hip_ratio, prefer_lower=True),
     ]
 
     if before.view_type == "side":
         metrics.append(
-            _build_metric(
-                "Abdomen projection",
-                before.abdomen_projection,
-                after.abdomen_projection,
-                prefer_lower=True,
-                unit_hint="side-profile",
-            )
+            _build_metric("abdomen_projection", before.abdomen_projection, after.abdomen_projection, prefer_lower=True)
         )
     else:
         metrics.append(
             _build_metric(
-                "Lower-body definition",
+                "lower_body_definition",
                 before.thigh_width / max(before.waist_width, 1e-6),
                 after.thigh_width / max(after.waist_width, 1e-6),
                 prefer_lower=False,
-                unit_hint="thigh-to-waist",
             )
         )
 
     change_score = round(sum(metric.change_percent for metric in metrics) / len(metrics), 1)
-    confidence_rank = min(before.visibility, after.visibility)
-    confidence = _confidence_label(confidence_rank, True)
-
-    summary = (
-        f"Compared with the earlier photo, the latest body shape reads as {_signal_label(change_score)}. "
-        f"The strongest signals came from waist-line change and upper-to-mid torso proportions."
-    )
+    confidence_code = _confidence_code(min(before.visibility, after.visibility), True)
 
     notes = [
-        "Use the same pose, distance, lighting, and clothing for the cleanest week-to-week comparison.",
-        "This report is best for tracking direction of change, not medical-grade body fat measurement.",
+        "keep_pose_consistent",
+        "report_is_directional",
     ]
-    if confidence == "low":
-        notes.append("Confidence is low because at least one image had weak pose visibility. A clearer full-body shot will help.")
+    if confidence_code == "low":
+        notes.append("low_confidence_photo")
 
     return ProgressAnalysis(
-        headline=_signal_headline(change_score),
-        summary=summary,
-        overall_signal=_signal_label(change_score),
-        confidence=confidence,
+        signal_code=_signal_code(change_score),
+        confidence_code=confidence_code,
         view_type=before.view_type,
         change_score=change_score,
         before_snapshot=before,
@@ -355,11 +310,9 @@ def analyze_progress(before_image_bgr: np.ndarray, after_image_bgr: np.ndarray) 
 
 def progress_analysis_dict(result: ProgressAnalysis) -> dict:
     return {
-        "headline": result.headline,
-        "summary": result.summary,
-        "overall_signal": result.overall_signal,
-        "confidence": result.confidence,
-        "view_type": result.view_type,
+        "signal_code": result.signal_code,
+        "confidence_code": result.confidence_code,
+        "view_code": result.view_type,
         "change_score": result.change_score,
         "before_snapshot": _snapshot_dict(result.before_snapshot),
         "after_snapshot": _snapshot_dict(result.after_snapshot),
