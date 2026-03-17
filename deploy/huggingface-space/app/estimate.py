@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 import shutil
 import tempfile
@@ -14,11 +14,44 @@ mp_pose = mp.solutions.pose
 
 
 @dataclass
-class EstimationResult:
-    estimated_body_fat_percent: float
+class BodySnapshot:
+    view_type: str
+    confidence: str
+    visibility: float
+    shoulder_width: float
+    hip_width: float
+    chest_width: float
+    waist_width: float
+    thigh_width: float
+    torso_height: float
+    leg_length: float
+    v_taper_ratio: float
+    waist_to_hip_ratio: float
+    torso_to_leg_ratio: float
+    abdomen_projection: float
+    silhouette_confidence: str
+
+
+@dataclass
+class ProgressMetric:
+    label: str
+    direction: str
+    change_percent: float
+    summary: str
+
+
+@dataclass
+class ProgressAnalysis:
+    headline: str
+    summary: str
+    overall_signal: str
     confidence: str
     view_type: str
-    summary: str
+    change_score: float
+    before_snapshot: BodySnapshot
+    after_snapshot: BodySnapshot
+    metrics: list[ProgressMetric]
+    notes: list[str]
 
 
 def _prepare_mediapipe_resources() -> None:
@@ -63,7 +96,7 @@ def _normalized_visibility(landmarks, names: list[str]) -> float:
 
 
 def _sample_mask_width(mask: np.ndarray, center_y: float, band: int = 4, threshold: float = 0.5) -> float:
-    if mask.ndim != 2:
+    if mask is None or mask.ndim != 2:
         return 0.0
 
     row_index = int(round(center_y * (mask.shape[0] - 1)))
@@ -83,65 +116,110 @@ def _clamp_ratio(value: float, low: float, high: float) -> float:
     return float(np.clip(value, low, high))
 
 
-def _estimate_front_view(
-    shoulder_width: float,
-    hip_width: float,
-    torso_height: float,
-    leg_length: float,
-    chest_width: float,
-    waist_width: float,
-    thigh_width: float,
-) -> float:
-    shoulder_width = max(shoulder_width, 1e-6)
-    hip_width = max(hip_width, 1e-6)
-    chest_width = max(chest_width, shoulder_width * 0.82)
-    waist_width = max(waist_width, hip_width * 0.45)
-    thigh_width = max(thigh_width, waist_width * 0.65)
-
-    waist_to_shoulder = _clamp_ratio(waist_width / shoulder_width, 0.45, 1.2)
-    waist_to_hip = _clamp_ratio(waist_width / hip_width, 0.5, 1.25)
-    chest_to_waist_drop = _clamp_ratio((chest_width - waist_width) / chest_width, -0.2, 0.45)
-    torso_to_leg = _clamp_ratio(torso_height / max(leg_length, 1e-6), 0.55, 1.25)
-    thigh_to_waist = _clamp_ratio(thigh_width / waist_width, 0.6, 1.5)
-
-    body_fat = 8.0
-    body_fat += (waist_to_shoulder - 0.55) * 26.0
-    body_fat += (waist_to_hip - 0.72) * 16.0
-    body_fat += (0.24 - chest_to_waist_drop) * 30.0
-    body_fat += (torso_to_leg - 0.72) * 10.0
-    body_fat += (0.92 - thigh_to_waist) * 6.0
-
-    return float(np.clip(body_fat, 6.0, 35.0))
+def _direction_from_delta(delta: float, threshold: float = 1.5) -> str:
+    if delta >= threshold:
+        return "up"
+    if delta <= -threshold:
+        return "down"
+    return "flat"
 
 
-def _estimate_side_view(
-    torso_height: float,
-    leg_length: float,
-    chest_width: float,
-    waist_width: float,
-    hip_width: float,
-    shoulder_hip_offset: float,
-) -> float:
-    torso_height = max(torso_height, 1e-6)
-    chest_width = max(chest_width, 1e-6)
-    waist_width = max(waist_width, chest_width * 0.7)
-    hip_width = max(hip_width, waist_width * 0.85)
-
-    waist_to_chest = _clamp_ratio(waist_width / chest_width, 0.65, 1.3)
-    hip_to_chest = _clamp_ratio(hip_width / chest_width, 0.7, 1.35)
-    torso_to_leg = _clamp_ratio(torso_height / max(leg_length, 1e-6), 0.55, 1.25)
-    abdomen_projection = _clamp_ratio(shoulder_hip_offset / torso_height, 0.0, 0.45)
-
-    body_fat = 9.0
-    body_fat += (waist_to_chest - 0.78) * 28.0
-    body_fat += (hip_to_chest - 0.9) * 10.0
-    body_fat += abdomen_projection * 30.0
-    body_fat += (torso_to_leg - 0.72) * 8.0
-
-    return float(np.clip(body_fat, 7.0, 38.0))
+def _confidence_label(visibility: float, has_mask: bool) -> str:
+    if visibility >= 0.82 and has_mask:
+        return "high"
+    if visibility >= 0.68:
+        return "medium"
+    return "low"
 
 
-def estimate_body_fat_from_landmarks(landmarks, segmentation_mask: np.ndarray | None = None) -> EstimationResult:
+def _signal_label(change_score: float) -> str:
+    if change_score >= 7:
+        return "strong improvement"
+    if change_score >= 2:
+        return "moderate improvement"
+    if change_score <= -7:
+        return "reverse trend"
+    if change_score <= -2:
+        return "slight regression"
+    return "mostly stable"
+
+
+def _signal_headline(change_score: float) -> str:
+    if change_score >= 7:
+        return "Clear tightening trend"
+    if change_score >= 2:
+        return "Solid visual progress"
+    if change_score <= -7:
+        return "Visible reverse trend"
+    if change_score <= -2:
+        return "Mixed result with some softness"
+    return "Body shape looks mostly stable"
+
+
+def _ratio_change(before: float, after: float) -> float:
+    if before <= 0:
+        return 0.0
+    return round(((after - before) / before) * 100, 1)
+
+
+def _build_metric(label: str, before: float, after: float, prefer_lower: bool, unit_hint: str) -> ProgressMetric:
+    raw_change = _ratio_change(before, after)
+    effective_change = -raw_change if prefer_lower else raw_change
+    direction = _direction_from_delta(effective_change)
+
+    if direction == "up":
+        tone = "improved"
+    elif direction == "down":
+        tone = "moved backward"
+    else:
+        tone = "stayed fairly similar"
+
+    summary = f"{label} {tone} by {abs(raw_change):.1f}% based on the {unit_hint} ratio."
+
+    return ProgressMetric(
+        label=label,
+        direction=direction,
+        change_percent=round(effective_change, 1),
+        summary=summary,
+    )
+
+
+def _snapshot_dict(snapshot: BodySnapshot) -> dict:
+    return asdict(snapshot)
+
+
+def _metrics_dict(metrics: list[ProgressMetric]) -> list[dict]:
+    return [asdict(metric) for metric in metrics]
+
+
+def _detect_view_type(shoulder_width: float, hip_width: float) -> str:
+    if shoulder_width < hip_width * 0.55:
+        return "side"
+    if shoulder_width / max(hip_width, 1e-6) < 0.75:
+        return "side"
+    return "front"
+
+
+def analyze_body_image(image_bgr: np.ndarray) -> BodySnapshot:
+    _prepare_mediapipe_resources()
+
+    pose = mp_pose.Pose(
+        static_image_mode=True,
+        model_complexity=1,
+        enable_segmentation=True,
+        min_detection_confidence=0.5,
+    )
+
+    image_rgb = image_bgr[:, :, ::-1]
+    result = pose.process(image_rgb)
+    pose.close()
+
+    if not result.pose_landmarks:
+        raise ValueError("No full body pose was detected. Please use a clearer full-body photo.")
+
+    landmarks = result.pose_landmarks.landmark
+    segmentation_mask = np.asarray(result.segmentation_mask) if result.segmentation_mask is not None else None
+
     left_shoulder = _get_landmark(landmarks, "LEFT_SHOULDER")
     right_shoulder = _get_landmark(landmarks, "RIGHT_SHOULDER")
     left_hip = _get_landmark(landmarks, "LEFT_HIP")
@@ -165,101 +243,126 @@ def estimate_body_fat_from_landmarks(landmarks, segmentation_mask: np.ndarray | 
 
     shoulder_mid_x, shoulder_mid_y = _midpoint(left_shoulder, right_shoulder)
     hip_mid_x, hip_mid_y = _midpoint(left_hip, right_hip)
+    knee_mid_y = _safe_average([left_knee.y, right_knee.y])
 
     chest_y = shoulder_mid_y + (hip_mid_y - shoulder_mid_y) * 0.25
     waist_y = shoulder_mid_y + (hip_mid_y - shoulder_mid_y) * 0.7
-    thigh_y = hip_mid_y + (_safe_average([left_knee.y, right_knee.y]) - hip_mid_y) * 0.35
+    thigh_y = hip_mid_y + (knee_mid_y - hip_mid_y) * 0.35
 
-    chest_width_mask = _sample_mask_width(segmentation_mask, chest_y) if segmentation_mask is not None else 0.0
-    waist_width_mask = _sample_mask_width(segmentation_mask, waist_y) if segmentation_mask is not None else 0.0
-    hip_width_mask = _sample_mask_width(segmentation_mask, hip_mid_y) if segmentation_mask is not None else 0.0
-    thigh_width_mask = _sample_mask_width(segmentation_mask, thigh_y) if segmentation_mask is not None else 0.0
+    chest_width = _sample_mask_width(segmentation_mask, chest_y) or shoulder_width * 0.95
+    waist_width = _sample_mask_width(segmentation_mask, waist_y) or hip_width * 0.78
+    hip_width_mask = _sample_mask_width(segmentation_mask, hip_mid_y)
+    thigh_width = _sample_mask_width(segmentation_mask, thigh_y) or waist_width * 0.92
 
-    front_view_signal = shoulder_width / max(hip_width, 1e-6)
-    if shoulder_width < hip_width * 0.55 or front_view_signal < 0.75:
-        view_type = "side"
-    else:
-        view_type = "front"
-
-    if view_type == "front":
-        chest_width = chest_width_mask or shoulder_width * 0.95
-        waist_width = waist_width_mask or hip_width * 0.78
-        hip_width_value = hip_width_mask or hip_width
-        thigh_width = thigh_width_mask or waist_width * 0.92
-        body_fat = _estimate_front_view(
-            shoulder_width=shoulder_width,
-            hip_width=hip_width_value,
-            torso_height=torso_height,
-            leg_length=leg_length,
-            chest_width=chest_width,
-            waist_width=waist_width,
-            thigh_width=thigh_width,
-        )
-    else:
-        chest_width = chest_width_mask or torso_height * 0.34
-        waist_width = waist_width_mask or chest_width * 0.95
-        hip_width_value = hip_width_mask or waist_width * 1.05
-        shoulder_hip_offset = abs(shoulder_mid_x - hip_mid_x)
-        body_fat = _estimate_side_view(
-            torso_height=torso_height,
-            leg_length=leg_length,
-            chest_width=chest_width,
-            waist_width=waist_width,
-            hip_width=hip_width_value,
-            shoulder_hip_offset=shoulder_hip_offset,
-        )
+    view_type = _detect_view_type(shoulder_width, hip_width)
+    if hip_width_mask > 0:
+        hip_width = hip_width_mask
 
     visibility = _normalized_visibility(
         landmarks,
-        [
-            "LEFT_SHOULDER",
-            "RIGHT_SHOULDER",
-            "LEFT_HIP",
-            "RIGHT_HIP",
-            "LEFT_KNEE",
-            "RIGHT_KNEE",
-        ],
+        ["LEFT_SHOULDER", "RIGHT_SHOULDER", "LEFT_HIP", "RIGHT_HIP", "LEFT_KNEE", "RIGHT_KNEE"],
     )
 
-    if visibility >= 0.8 and segmentation_mask is not None:
-        confidence = "high"
-    elif visibility >= 0.65:
-        confidence = "medium"
+    v_taper_ratio = _clamp_ratio(chest_width / max(waist_width, 1e-6), 0.7, 2.0)
+    waist_to_hip_ratio = _clamp_ratio(waist_width / max(hip_width, 1e-6), 0.45, 1.4)
+    torso_to_leg_ratio = _clamp_ratio(torso_height / max(leg_length, 1e-6), 0.55, 1.3)
+    abdomen_projection = _clamp_ratio(abs(shoulder_mid_x - hip_mid_x) / torso_height, 0.0, 0.45)
+
+    silhouette_confidence = "good" if segmentation_mask is not None else "limited"
+
+    return BodySnapshot(
+        view_type=view_type,
+        confidence=_confidence_label(visibility, segmentation_mask is not None),
+        visibility=visibility,
+        shoulder_width=round(shoulder_width, 4),
+        hip_width=round(hip_width, 4),
+        chest_width=round(chest_width, 4),
+        waist_width=round(waist_width, 4),
+        thigh_width=round(thigh_width, 4),
+        torso_height=round(torso_height, 4),
+        leg_length=round(leg_length, 4),
+        v_taper_ratio=round(v_taper_ratio, 3),
+        waist_to_hip_ratio=round(waist_to_hip_ratio, 3),
+        torso_to_leg_ratio=round(torso_to_leg_ratio, 3),
+        abdomen_projection=round(abdomen_projection, 3),
+        silhouette_confidence=silhouette_confidence,
+    )
+
+
+def analyze_progress(before_image_bgr: np.ndarray, after_image_bgr: np.ndarray) -> ProgressAnalysis:
+    before = analyze_body_image(before_image_bgr)
+    after = analyze_body_image(after_image_bgr)
+
+    if before.view_type != after.view_type:
+        raise ValueError("Before and after photos should use the same angle. Please upload matching front/front or side/side photos.")
+
+    metrics = [
+        _build_metric("Waist line", before.waist_width, after.waist_width, prefer_lower=True, unit_hint="waist silhouette"),
+        _build_metric("V-taper", before.v_taper_ratio, after.v_taper_ratio, prefer_lower=False, unit_hint="shoulder-to-waist"),
+        _build_metric("Waist-to-hip balance", before.waist_to_hip_ratio, after.waist_to_hip_ratio, prefer_lower=True, unit_hint="waist-to-hip"),
+    ]
+
+    if before.view_type == "side":
+        metrics.append(
+            _build_metric(
+                "Abdomen projection",
+                before.abdomen_projection,
+                after.abdomen_projection,
+                prefer_lower=True,
+                unit_hint="side-profile",
+            )
+        )
     else:
-        confidence = "low"
+        metrics.append(
+            _build_metric(
+                "Lower-body definition",
+                before.thigh_width / max(before.waist_width, 1e-6),
+                after.thigh_width / max(after.waist_width, 1e-6),
+                prefer_lower=False,
+                unit_hint="thigh-to-waist",
+            )
+        )
+
+    change_score = round(sum(metric.change_percent for metric in metrics) / len(metrics), 1)
+    confidence_rank = min(before.visibility, after.visibility)
+    confidence = _confidence_label(confidence_rank, True)
 
     summary = (
-        f"Estimated from a {view_type} body pose using pose landmarks and body silhouette ratios. "
-        "This is a rough visual heuristic, not a medical measurement."
+        f"Compared with the earlier photo, the latest body shape reads as {_signal_label(change_score)}. "
+        f"The strongest signals came from waist-line change and upper-to-mid torso proportions."
     )
 
-    return EstimationResult(
-        estimated_body_fat_percent=round(body_fat, 1),
-        confidence=confidence,
-        view_type=view_type,
+    notes = [
+        "Use the same pose, distance, lighting, and clothing for the cleanest week-to-week comparison.",
+        "This report is best for tracking direction of change, not medical-grade body fat measurement.",
+    ]
+    if confidence == "low":
+        notes.append("Confidence is low because at least one image had weak pose visibility. A clearer full-body shot will help.")
+
+    return ProgressAnalysis(
+        headline=_signal_headline(change_score),
         summary=summary,
+        overall_signal=_signal_label(change_score),
+        confidence=confidence,
+        view_type=before.view_type,
+        change_score=change_score,
+        before_snapshot=before,
+        after_snapshot=after,
+        metrics=metrics,
+        notes=notes,
     )
 
 
-def estimate_body_fat_from_image(image_bgr: np.ndarray) -> EstimationResult:
-    _prepare_mediapipe_resources()
-
-    pose = mp_pose.Pose(
-        static_image_mode=True,
-        model_complexity=1,
-        enable_segmentation=True,
-        min_detection_confidence=0.5,
-    )
-
-    image_rgb = image_bgr[:, :, ::-1]
-    result = pose.process(image_rgb)
-    pose.close()
-
-    if not result.pose_landmarks:
-        raise ValueError("No full body pose was detected. Please upload a clearer front or side body image.")
-
-    segmentation_mask = None
-    if result.segmentation_mask is not None:
-        segmentation_mask = np.asarray(result.segmentation_mask)
-
-    return estimate_body_fat_from_landmarks(result.pose_landmarks.landmark, segmentation_mask)
+def progress_analysis_dict(result: ProgressAnalysis) -> dict:
+    return {
+        "headline": result.headline,
+        "summary": result.summary,
+        "overall_signal": result.overall_signal,
+        "confidence": result.confidence,
+        "view_type": result.view_type,
+        "change_score": result.change_score,
+        "before_snapshot": _snapshot_dict(result.before_snapshot),
+        "after_snapshot": _snapshot_dict(result.after_snapshot),
+        "metrics": _metrics_dict(result.metrics),
+        "notes": result.notes,
+    }
