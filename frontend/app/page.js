@@ -138,6 +138,145 @@ function buildWeeklySummary(records, meals, compareHistory) {
   };
 }
 
+function localizeConfidenceLabel(value) {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized.includes("high")) return "신뢰도 높음";
+  if (normalized.includes("medium")) return "신뢰도 보통";
+  if (normalized.includes("low")) return "신뢰도 낮음";
+  return value || "신뢰도 보통";
+}
+
+function localizeSignal(value) {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized.includes("strong improvement")) return "좋아지는 흐름이 분명해요";
+  if (normalized.includes("moderate improvement")) return "전반적으로 좋아지는 흐름이에요";
+  if (normalized.includes("reverse trend")) return "예전보다 흐름이 조금 무너졌어요";
+  if (normalized.includes("slight regression")) return "약간 둔해진 변화가 보여요";
+  if (normalized.includes("mostly stable")) return "전체적으로 비슷한 흐름이에요";
+  return value || "변화 분석";
+}
+
+function localizeHeadline(value) {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized.includes("clear tightening trend")) return "눈에 띄게 정리된 흐름이 보여요";
+  if (normalized.includes("solid visual progress")) return "사진상 좋아진 흐름이 보여요";
+  if (normalized.includes("visible reverse trend")) return "이전보다 둔한 흐름이 보여요";
+  if (normalized.includes("mixed result with some softness")) return "좋아진 부분과 아쉬운 부분이 함께 보여요";
+  if (normalized.includes("body shape looks mostly stable")) return "전체적으로 비슷한 상태로 보여요";
+  return value || "눈바디 변화 리포트";
+}
+
+function localizeMetricLabel(label) {
+  const normalized = String(label || "").toLowerCase();
+  if (normalized.includes("waist line")) return "허리선";
+  if (normalized.includes("v-taper")) return "상체 라인";
+  if (normalized.includes("waist-to-hip balance")) return "허리-골반 밸런스";
+  if (normalized.includes("lower-body definition")) return "하체 밸런스";
+  if (normalized.includes("abdomen projection")) return "복부 돌출감";
+  return label || "변화 지표";
+}
+
+function buildLocalizedMetricSummary(label, changePercent) {
+  const amount = Math.abs(Number(changePercent) || 0).toFixed(1);
+  const positive = (Number(changePercent) || 0) > 1.5;
+  const negative = (Number(changePercent) || 0) < -1.5;
+
+  if (label === "허리선") {
+    if (positive) return `허리 실루엣이 이전보다 ${amount}% 정도 더 정리된 흐름으로 읽혀요.`;
+    if (negative) return `허리선이 이전보다 ${amount}% 정도 덜 정리된 흐름으로 보여요.`;
+    return "허리선은 전후 사진에서 큰 차이 없이 비슷하게 보여요.";
+  }
+
+  if (label === "상체 라인") {
+    if (positive) return `어깨 대비 허리 비율이 좋아져 상체 라인이 ${amount}% 정도 또렷해 보여요.`;
+    if (negative) return `상체 대비 허리 라인이 이전보다 ${amount}% 정도 덜 또렷하게 읽혀요.`;
+    return "상체 라인은 전후 사진에서 크게 달라 보이지 않아요.";
+  }
+
+  if (label === "허리-골반 밸런스") {
+    if (positive) return `허리와 골반 비율이 ${amount}% 정도 더 안정적으로 보여요.`;
+    if (negative) return `허리-골반 밸런스가 이전보다 ${amount}% 정도 덜 안정적으로 읽혀요.`;
+    return "허리-골반 밸런스는 전후가 비슷하게 보여요.";
+  }
+
+  if (label === "하체 밸런스") {
+    if (positive) return `하체 대비 허리 비율이 ${amount}% 정도 좋아져 전체 밸런스가 나아 보여요.`;
+    if (negative) return `하체 밸런스가 이전보다 ${amount}% 정도 덜 선명하게 보일 수 있어요.`;
+    return "하체 밸런스는 큰 차이 없이 비슷해 보여요.";
+  }
+
+  if (label === "복부 돌출감") {
+    if (positive) return `측면 기준 복부 돌출감이 ${amount}% 정도 줄어든 흐름으로 읽혀요.`;
+    if (negative) return `측면 기준 복부 돌출감이 이전보다 ${amount}% 정도 더 도드라져 보여요.`;
+    return "복부 돌출감은 전후 사진에서 비슷하게 보여요.";
+  }
+
+  return `${label} 변화가 ${amount}% 정도 감지됐어요.`;
+}
+
+function buildLocalizedSummary(changeScore) {
+  if (changeScore >= 7) {
+    return "이전 사진과 비교하면 최근 사진에서 전체 라인이 더 정리된 흐름으로 보여요. 특히 허리선과 상체 비율 변화가 좋게 읽혔어요.";
+  }
+  if (changeScore >= 2) {
+    return "전반적으로는 좋아지는 흐름이 보이지만, 극적인 차이라기보다 서서히 정리되는 느낌에 가까워요.";
+  }
+  if (changeScore <= -7) {
+    return "이전 사진보다 최근 사진에서 라인이 덜 정리돼 보이는 신호가 있어요. 촬영 조건 차이도 함께 확인해 보는 게 좋아요.";
+  }
+  if (changeScore <= -2) {
+    return "조금 둔해진 변화가 읽히지만, 자세나 거리 차이의 영향도 함께 있을 수 있어요.";
+  }
+  return "전후 사진을 비교했을 때 전체적으로는 비슷한 흐름으로 보여요. 큰 변화보다는 유지에 가까운 상태예요.";
+}
+
+function localizeNotes(notes, confidence) {
+  const localized = [
+    "같은 자세, 같은 거리, 같은 조명으로 찍을수록 전후 비교가 더 자연스럽고 믿을 만해집니다.",
+    "이 리포트는 몸 변화의 방향을 보는 용도에 적합하고, 의료용 체지방 측정값을 대신하진 않아요."
+  ];
+
+  if (String(confidence).includes("낮음") || String(confidence).toLowerCase().includes("low")) {
+    localized.push("이번 비교는 사진 인식 신호가 약해서 신뢰도가 낮아요. 전신이 더 잘 보이는 사진이면 결과가 더 안정적입니다.");
+  }
+
+  if (Array.isArray(notes) && notes.length > 2) {
+    return localized.concat(notes.slice(2));
+  }
+
+  return localized;
+}
+
+function localizeProgressPayload(payload) {
+  const localizedConfidence = localizeConfidenceLabel(payload.confidence);
+  const localizedMetrics = (payload.metrics || []).map((metric) => {
+    const localizedLabel = localizeMetricLabel(metric.label);
+    return {
+      ...metric,
+      label: localizedLabel,
+      summary: buildLocalizedMetricSummary(localizedLabel, metric.change_percent)
+    };
+  });
+
+  return {
+    ...payload,
+    overall_signal: localizeSignal(payload.overall_signal),
+    headline: localizeHeadline(payload.headline),
+    summary: buildLocalizedSummary(payload.change_score),
+    confidence: localizedConfidence,
+    metrics: localizedMetrics,
+    notes: localizeNotes(payload.notes, localizedConfidence),
+    before_snapshot: {
+      ...payload.before_snapshot,
+      view: payload.before_snapshot?.view || payload.before_snapshot?.view_type || "정면"
+    },
+    after_snapshot: {
+      ...payload.after_snapshot,
+      view: payload.after_snapshot?.view || payload.after_snapshot?.view_type || "정면"
+    }
+  };
+}
+
 function HomeTab({ records, meals, compareHistory, onMove }) {
   const summary = buildWeeklySummary(records, meals, compareHistory);
   const today = formatDate();
@@ -747,7 +886,7 @@ export default function HomePage() {
       const parsed = JSON.parse(raw);
       setRecords(parsed.records || []);
       setMeals(parsed.meals || []);
-      setCompareHistory(parsed.compareHistory || []);
+      setCompareHistory((parsed.compareHistory || []).map(localizeProgressPayload));
     } catch {
       // Ignore malformed local data and start fresh.
     }
@@ -863,7 +1002,7 @@ export default function HomePage() {
         beforeId,
         afterId,
         angle,
-        ...payload
+        ...localizeProgressPayload(payload)
       };
 
       setCompareResult(entry);
