@@ -6,3 +6,14 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
+    envVars:
+      - key: CORS_ALLOW_ORIGINS
+        value: https://body-fat-estimator-web.onrender.com
+  - type: static
+    name: body-fat-estimator-web
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: out
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        value: https://body-fat-estimator-api.onrender.com
