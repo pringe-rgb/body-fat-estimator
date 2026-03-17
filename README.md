@@ -58,6 +58,32 @@ Recommended setup:
 - Frontend: Vercel
 - Backend: Render
 
+## Free deploy
+
+Recommended fully-free setup:
+
+- Frontend: Vercel Hobby
+- Backend: Hugging Face Spaces
+
+### Backend on Hugging Face Spaces
+
+Use the files in [deploy/huggingface-space](C:/Users/USER/OneDrive/문서/codex/deploy/huggingface-space).
+
+1. Create a new Hugging Face Space.
+2. Choose `Docker` SDK.
+3. Upload the contents of `deploy/huggingface-space` to that Space repository.
+4. Wait for the Space build to finish.
+5. Your API URL will look like:
+   - `https://YOUR-SPACE-NAME.hf.space`
+
+### Frontend on Vercel
+
+1. Import this GitHub repository into Vercel.
+2. Set the project root directory to `frontend`.
+3. Add environment variable:
+   - `NEXT_PUBLIC_API_URL=https://YOUR-SPACE-NAME.hf.space`
+4. Deploy.
+
 ### Backend on Render
 
 1. Push this repository to GitHub.
