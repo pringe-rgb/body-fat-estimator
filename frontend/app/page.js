@@ -61,6 +61,31 @@ function readFileAsDataUrl(file) {
   });
 }
 
+function resizeImageDataUrl(dataUrl, maxSize = 1400, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+      const width = Math.max(1, Math.round(image.width * scale));
+      const height = Math.max(1, Math.round(image.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+
+      const context = canvas.getContext("2d");
+      if (!context) {
+        resolve(dataUrl);
+        return;
+      }
+
+      context.drawImage(image, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    image.onerror = () => reject(new Error("이미지를 읽지 못했습니다."));
+    image.src = dataUrl;
+  });
+}
+
 function dataUrlToBlob(dataUrl) {
   const [header, data] = dataUrl.split(",");
   const mime = header.match(/:(.*?);/)?.[1] || "image/jpeg";
@@ -268,8 +293,14 @@ function RecordTab({ draft, setDraft, onSave, saveError, isSaving, isLimitReache
   const onFileChange = (field) => async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    const dataUrl = await readFileAsDataUrl(file);
-    setDraft((current) => ({ ...current, [field]: dataUrl }));
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const resizedDataUrl = await resizeImageDataUrl(dataUrl);
+      setDraft((current) => ({ ...current, [field]: resizedDataUrl }));
+    } catch {
+      setDraft((current) => ({ ...current, [field]: "" }));
+    }
   };
 
   return (
@@ -723,14 +754,20 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        records,
-        meals,
-        compareHistory
-      })
-    );
+    try {
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          records,
+          meals,
+          compareHistory
+        })
+      );
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "QuotaExceededError") {
+        setSaveError("저장 공간이 부족해 기록을 이 기기에 저장하지 못했습니다. 더 작은 사진으로 다시 시도해 주세요.");
+      }
+    }
   }, [records, meals, compareHistory]);
 
   useEffect(() => {
